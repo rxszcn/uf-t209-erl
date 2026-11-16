@@ -45,3 +45,32 @@ Retrieves the hit count and reset time from the store for a given key.
 Note: `getKey` depends on store support. It works with the MemoryStore and
 cluster-memory-store, but may not work with other stores. Calling it will throw
 an error if the store does not have a `get` method.
+
+## `shutdown()`
+
+Shuts down the middleware's store, stopping its timers and releasing the
+resources it holds (for the default MemoryStore, that is the window-reset
+interval and the hit-count maps). Returns a promise that resolves once the store
+has been shut down.
+
+Call this when the limiter is no longer needed — for example when retiring an
+old instance during a rolling restart, or at the end of a test run — so the
+store's resources do not linger for the lifetime of the process:
+
+```ts
+const limiter = rateLimit({
+	// ...
+})
+
+app.use(limiter)
+
+// Later, when the limiter is being torn down:
+await limiter.shutdown()
+```
+
+The method is idempotent: only the first call performs the shutdown, and
+subsequent calls return the same promise.
+
+Note: `shutdown` depends on store support. If the configured store does not
+implement a `shutdown` method, a warning is logged and the returned promise
+resolves without doing anything.

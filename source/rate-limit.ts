@@ -90,6 +90,12 @@ const promisifyStore = (passedStore: LegacyStore | Store): Store => {
 			if (typeof legacyStore.resetAll === 'function')
 				return legacyStore.resetAll()
 		}
+
+		/* istanbul ignore next */
+		async shutdown(): Promise<void> {
+			if (typeof legacyStore.shutdown === 'function')
+				return legacyStore.shutdown()
+		}
 	}
 
 	return new PromisifiedStore()
@@ -304,6 +310,8 @@ const parseOptions = (passedOptions: Partial<Options>): Configuration => {
 		typeof config.store.resetKey !== 'function' ||
 		(config.store.resetAll !== undefined &&
 			typeof config.store.resetAll !== 'function') ||
+		(config.store.shutdown !== undefined &&
+			typeof config.store.shutdown !== 'function') ||
 		(config.store.init !== undefined && typeof config.store.init !== 'function')
 	) {
 		throw new TypeError(
@@ -674,6 +682,35 @@ const rateLimit = (
 		typeof config.store.get === 'function'
 			? config.store.get.bind(config.store)
 			: getThrowFn
+
+	// Export a `shutdown` method so the store's resources (window timers, hit
+	// count maps, connections, etc.) can be released when the middleware is
+	// torn down, e.g. when an old instance is retired during a rolling
+	// restart or at the end of a load-test run.
+	let shutdownPromise: Promise<void> | undefined
+	;(middleware as RateLimitRequestHandler).shutdown = (): Promise<void> => {
+		// Idempotent: only the first call performs the shutdown, subsequent
+		// calls return the same promise so the store's `shutdown` is never
+		// invoked more than once.
+		if (!shutdownPromise) {
+			shutdownPromise = (async () => {
+				if (typeof config.store.shutdown === 'function') {
+					debug('shutting down store')
+					await config.store.shutdown()
+				} else {
+					// The store has no shutdown capability. Resolve without error
+					// (shutdown typically runs during process exit, where throwing
+					// would be disruptive), but log a warning so the no-op is
+					// explicit rather than silent.
+					config.logger.warn(
+						'express-rate-limit: the configured store does not implement `shutdown`, nothing to release.',
+					)
+				}
+			})()
+		}
+
+		return shutdownPromise
+	}
 
 	return middleware as RateLimitRequestHandler
 }

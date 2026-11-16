@@ -42,6 +42,8 @@ describe('middleware test', () => {
 		resetKeyWasCalled = false
 		getWasCalled = false
 		resetAllWasCalled = false
+		shutdownWasCalled = false
+		shutdownCallCount = 0
 
 		counter = 0
 		windowMs = 0
@@ -79,6 +81,11 @@ describe('middleware test', () => {
 		async resetAll(): Promise<void> {
 			this.resetAllWasCalled = true
 		}
+
+		async shutdown(): Promise<void> {
+			this.shutdownWasCalled = true
+			this.shutdownCallCount += 1
+		}
 	}
 
 	class MockLegacyStore implements LegacyStore {
@@ -87,6 +94,7 @@ describe('middleware test', () => {
 		decrementWasCalled = false
 		resetKeyWasCalled = false
 		resetAllWasCalled = false
+		shutdownWasCalled = false
 
 		counter = 0
 
@@ -108,6 +116,10 @@ describe('middleware test', () => {
 
 		resetAll(): void {
 			this.resetAllWasCalled = true
+		}
+
+		shutdown(): void {
+			this.shutdownWasCalled = true
 		}
 	}
 
@@ -604,6 +616,65 @@ describe('middleware test', () => {
 		})
 
 		expect(limiter.getKey).toThrow()
+	})
+
+	class MockStoreWithoutShutdown implements Store {
+		async increment(_key: string): Promise<ClientRateLimitInfo> {
+			return { totalHits: 1, resetTime: undefined }
+		}
+
+		async decrement(_key: string): Promise<void> {}
+
+		async resetKey(_key: string): Promise<void> {}
+	}
+
+	it.each([
+		['modern', new MockStore()],
+		['legacy', new MockLegacyStore()],
+	])('should call `shutdown` on the store (%s store)', async (name, store) => {
+		const limiter = rateLimit({
+			store,
+		})
+
+		await limiter.shutdown()
+
+		expect(store.shutdownWasCalled).toEqual(true)
+	})
+
+	it('should only shut the store down once, no matter how many times `shutdown` is called', async () => {
+		const store = new MockStore()
+		const limiter = rateLimit({
+			store,
+		})
+
+		await limiter.shutdown()
+		await limiter.shutdown()
+		await Promise.all([limiter.shutdown(), limiter.shutdown()])
+
+		expect(store.shutdownCallCount).toEqual(1)
+	})
+
+	it('should log a warning and resolve if the store does not implement `shutdown`', async () => {
+		const logger: Logger = {
+			error: jest.fn(),
+			warn: jest.fn(),
+		}
+		const store = new MockStoreWithoutShutdown()
+		const limiter = rateLimit({
+			store,
+			logger,
+		})
+
+		await expect(limiter.shutdown()).resolves.toBeUndefined()
+		expect(logger.warn).toHaveBeenCalledTimes(1)
+	})
+
+	it('should release the default memory store when `shutdown` is called', async () => {
+		const limiter = rateLimit()
+
+		await expect(limiter.shutdown()).resolves.toBeUndefined()
+		// A second call is a no-op and also resolves.
+		await expect(limiter.shutdown()).resolves.toBeUndefined()
 	})
 
 	it.each([

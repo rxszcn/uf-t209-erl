@@ -122,6 +122,21 @@ export type RateLimitRequestHandler = RequestHandler & {
 		| Promise<ClientRateLimitInfo | undefined>
 		| ClientRateLimitInfo
 		| undefined
+
+	/**
+	 * Method to shutdown the middleware's store, stop its timers, and release
+	 * all resources it holds.
+	 *
+	 * Forwards to the store's `shutdown` method if the store implements one.
+	 * If the store does not support shutdown, a warning is logged and the
+	 * returned promise resolves without doing anything.
+	 *
+	 * Idempotent: only the first call performs the shutdown, subsequent calls
+	 * return the same promise.
+	 *
+	 * @returns {Promise<void>} - A promise that resolves once the store has been shut down.
+	 */
+	shutdown: () => Promise<void>
 }
 
 /**
@@ -156,6 +171,11 @@ export type LegacyStore = {
 	 * Method to reset everyone's hit counter.
 	 */
 	resetAll?: () => void
+
+	/**
+	 * Method to shutdown the store, stop timers, and release all resources.
+	 */
+	shutdown?: () => void
 }
 
 /**
